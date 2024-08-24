@@ -1,0 +1,240 @@
+Sub CalcStockData()
+
+On Error GoTo Errhand
+    
+    Dim i As Long     'use as a counter to control total loop on page (based on row count)
+    Dim ws As Worksheet
+    Dim FindLastrow As Long   'used in the sort process
+    Dim TickerSymbolPrev As String
+    Dim TickerSymbolCurr As String
+    
+    Dim OpenPrice As Double   'this will be the first row of each symbol, 3rd col (C)
+    Dim ClosePrice As Double   'this will be the last row for each symbol, 6th col (F)
+    
+
+    'output variables - Columns J - Q
+    Dim SumRow As Long   'this will be the row for our output - starting at 2
+    Dim TickerTotal As Double
+    Dim HighestTotal As Double  'for all records get the highest volume (Totals in M)
+    Dim HighestTotalTicker As String
+    
+    'assumptions that need to be checked:
+    'Quarterly change is being calculated by taking the Closing Price (last day) minus the Open price (first day)
+    'percentage divides that number by the opening price
+    
+    'Turning off screen updating runs the code faster and hides the processing as it takes place
+    'Application.ScreenUpdating = False
+
+
+    For Each ws In Worksheets
+
+        ws.Select
+
+        If SheetValid() = True Then
+            'add column headers for the output
+            ws.Cells(1, 9).Value = "Ticker"
+            ws.Cells(1, 10).Value = "Quarterly Change"
+            ws.Cells(1, 11).Value = "Percent Change"
+            ws.Cells(1, 12).Value = "Total Stock Volume"
+        
+            ws.Cells(2, 15).Value = "Greatest % Increase"
+            ws.Cells(3, 15).Value = "Greatest % Decrease"
+            ws.Cells(4, 15).Value = "Greatest Total Volume"
+            ws.Cells(1, 16).Value = "Ticker"
+            ws.Cells(1, 17).Value = "Value"
+            
+
+            
+            'get the last row that has data in it
+            FindLastrow = Range("A" & Rows.Count).End(xlUp).Row
+    
+            'since the code is walking through the ticker symbols to get the range, make sure they
+            'have been sorted (col A then Col B)  A bad sort will invalidate results
+            SortData (FindLastrow)
+        
+            'initialize the row for our summary data output - this will manually get
+            'increased by one after summaries are entered
+            SumRow = 2
+            
+            'initialize total variables
+            TickerTotal = 0
+            HighestTotal = 0
+            
+            'initialize to the first symbol and open price on row 2
+            'future ones are handled inside the loop
+            TickerSymbolPrev = ws.Cells(2, 1)
+            OpenPrice = ws.Cells(2, 3).Value
+                
+            
+            'loop through all data rows
+            For i = 2 To FindLastrow + 1
+                TickerSymbolCurr = ws.Cells(i, 1).Value
+                
+                If TickerSymbolCurr = TickerSymbolPrev Then
+                    'we are still on the same symbol, do the running total - stored in the seventh column
+                    TickerTotal = TickerTotal + ws.Cells(i, 7).Value
+                    
+                Else
+                    'closing price was the row above this
+                    ClosePrice = ws.Cells(i - 1, 6)
+                    
+                    'we are on a new symbol so enter the output and add 1 more to the Sumrow
+                    ws.Cells(SumRow, 9).Value = TickerSymbolPrev
+                    ws.Cells(SumRow, 10).Value = ClosePrice - OpenPrice
+                    ws.Cells(SumRow, 11).Value = ((ClosePrice - OpenPrice) / OpenPrice / 100) * 100
+                    ws.Cells(SumRow, 12).Value = TickerTotal
+                    
+                    'add to output row location
+                    SumRow = SumRow + 1
+                    
+                    'Cells P4 and Q4 are going to display the highest volume ticker - keep track
+                    'of which one was the highest using these variables
+                    If TickerTotal > HighestTotal Then
+                        HighestTotal = TickerTotal
+                        HighestTotalTicker = TickerSymbolPrev
+                    End If
+                    
+                    'reset the total
+                    TickerTotal = 0
+                
+                    'start accumulating totals for the new group
+                    'otherwise the first record gets lost
+                    If i <= FindLastrow Then
+                        TickerTotal = ws.Cells(i, 7).Value
+                        OpenPrice = ws.Cells(i, 3).Value
+                    End If
+                    
+                
+                
+                End If
+                
+                'make the former symbol the new current one for comparison purpose
+                TickerSymbolPrev = TickerSymbolCurr
+
+            Next i
+              
+        End If
+        
+        'for this sheet, add formulas that show the greater increase/decrease and volume
+        'Column P symbol  Q = value
+        'do the Max and Min first because the lookup formula relies on those
+        'Q greatest increase
+        ws.Cells(2, 17).FormulaR1C1 = "=Max(C[-6])"
+        'Q greatest decrease
+        ws.Cells(3, 17).FormulaR1C1 = "=Min(C[-6])"
+        
+        'lookup formula to get the ticker - could be an issue with ties
+        ws.Cells(2, 16).FormulaR1C1 = "=XLOOKUP(RC[1],C[-5],C[-7],,0)"
+        ws.Cells(3, 16).FormulaR1C1 = "=XLOOKUP(RC[1],C[-5],C[-7],,0)"
+        
+        'check with Chris whether to keep formulas or paste special them
+        'he might want to modify the code so that these are handled similar to the stock totals
+        'but it seems like more work than it's worth?
+        
+        Range("P2:Q3").Select
+        Range("P2:Q3").Copy
+        Selection.PasteSpecial Paste:=xlPasteValues, Operation:=xlNone, SkipBlanks _
+        :=False, Transpose:=False
+        
+        'the greatest volume stocks were captured in the loop - just put the results here
+        ws.Cells(4, 16).Value = HighestTotalTicker
+        ws.Cells(4, 17).Value = HighestTotal
+        
+        'avoid exponential notation - do we need/want decimals here?
+        ws.Cells(4, 17).NumberFormat = "0"
+    
+        'formatting cleanup
+        Columns("J:L").ColumnWidth = 18
+        Columns("O:O").ColumnWidth = 22
+        Columns("P:P").ColumnWidth = 13
+        Columns("Q:Q").ColumnWidth = 16
+    
+        Columns("K:K").NumberFormat = "0.00%"
+        Columns("L:L").NumberFormat = "0"
+    
+        ConditFormatting
+
+    Next ws
+    
+    Application.ScreenUpdating = True
+    
+    MsgBox "All set!"
+   
+Exit_Errhand:
+    Exit Sub
+    
+Errhand:
+    MsgBox Err.Number & " " & Err.Description
+    Resume Exit_Errhand
+    
+End Sub
+
+Function SheetValid() As Boolean
+'return true if the values in A1 and B1 are <ticker> and <date> respectively
+'otherwise skip this worksheet
+'Instructions state that students can put the results on a different sheet, so if that was done
+'this will help prevent an accidental overwrite of that data!
+
+If ActiveSheet.Range("A1").Value = "<ticker>" And ActiveSheet.Range("B1").Value = "<date>" Then
+    SheetValid = True
+Else
+    SheetValid = False
+End If
+End Function
+Sub SortData(lLastRow As Long)
+'always assume sorting starts in row 2 (headers yes)
+'on these sheets we are always going from A through G
+    ActiveSheet.Range("A1:G" & lLastRow).Select
+    ActiveSheet.Sort.SortFields.Clear
+    ActiveSheet.Sort.SortFields.Add2 Key:=Range( _
+        "A2:A" & lLastRow), SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:= _
+        xlSortNormal
+    ActiveSheet.Sort.SortFields.Add2 Key:=Range( _
+        "B2:B" & lLastRow), SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:= _
+        xlSortNormal
+    With ActiveSheet.Sort
+        .Header = xlYes
+        .MatchCase = False
+        .Orientation = xlTopToBottom
+        .SortMethod = xlPinYin
+        .Apply
+    End With
+    
+    'deselect
+    Range("A1").Select
+    
+End Sub
+Function ConditFormatting()
+
+    Range("J2:K6").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Selection.FormatConditions.Add Type:=xlCellValue, Operator:=xlGreater, _
+        Formula1:="=0"
+    Selection.FormatConditions(Selection.FormatConditions.Count).SetFirstPriority
+    With Selection.FormatConditions(1).Interior
+        .PatternColorIndex = xlAutomatic
+        .Color = 7667457
+        .TintAndShade = 0
+    End With
+    Selection.FormatConditions(1).StopIfTrue = False
+    Selection.FormatConditions.Add Type:=xlCellValue, Operator:=xlLess, _
+        Formula1:="=0"
+    Selection.FormatConditions(Selection.FormatConditions.Count).SetFirstPriority
+    With Selection.FormatConditions(1).Interior
+        .PatternColorIndex = xlAutomatic
+        .Color = 255
+        .TintAndShade = 0
+    End With
+    Selection.FormatConditions(1).StopIfTrue = False
+    Range("A1").Select
+    
+End Function
+
+Sub ClearforTesting()
+
+    Sheets(Array("Q1", "Q2", "Q3", "Q4")).Select
+    Sheets("Q1").Activate
+    Columns("I:U").Select
+    Selection.Clear
+    Sheets("Q1").Select
+End Sub
